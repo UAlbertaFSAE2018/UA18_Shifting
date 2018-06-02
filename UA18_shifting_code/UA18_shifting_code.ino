@@ -5,12 +5,12 @@
 
 
 #define DEBUG_MODE          true
-#define DUAL_CHANNEL        false
+#define DUAL_CHANNEL        false   // false if single channel
 #define BAUD_RATE           9600
 
 // Pinout
-#define POSITION_SENSOR_PIN A3  // analog pin that the potentiometer is attached to
-#define DOWNSHIFT_PIN       5   // upshift/downshift buttons have pulldown resistors
+#define POSITION_SENSOR_PIN A3      // analog pin that the potentiometer is attached to
+#define DOWNSHIFT_PIN       5       // upshift/downshift buttons have pulldown resistors
 #define UPSHIFT_PIN         3
 #define RPM_IN_PIN          A5
 #define IGNITION_CUT_PIN    13
@@ -29,6 +29,14 @@
 #define DEBOUNCE_TIME       5       // 5ms
 #define NEUTRAL_LOCK_TIME   1000    // 1000ms / 1s
 #define MAX_CURRENT_ERROR   100     // 100mA
+#define MOTOR_STOPPED       0x0000
+
+
+//unsigned int getM1CurrentMilliamps();
+//unsigned int getM2CurrentMilliamps();
+//unsigned int motorCurrentMilliamps();
+//unsigned char getM1Fault();
+//unsigned char getM2Fault();
 
 
 bool upshiftPressed = false;
@@ -38,23 +46,10 @@ unsigned long timeUpshiftReleased = millis();
 unsigned long timeDownshiftReleased = millis();
 unsigned long timeDownshiftPressed = millis();
 
-unsigned long time;
-unsigned long neutralTimer;
-unsigned int getM1CurrentMilliamps();
-unsigned int getM2CurrentMilliamps();
-unsigned int motorCurrentMilliamps();
-unsigned char getM1Fault();
-unsigned char getM2Fault();
 int sensorValue; // value read from the pot
 int currentGear;
 int targetGear; 
-int motorValue = 0;
-int upshiftState = 0; //current button state
-int downshiftState = 0;
-int lastUpshiftState = 0; //previous button state
-int lastDownshiftState = 0;
-int meanCurrent = 0;
-int lastWorkingGear = 0; // is it okay to assume that this is Neutral?
+int lastWorkingGear;
 int gearPos[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add N=174)
 
 double currentPosition;
@@ -77,7 +72,7 @@ void setup() {
     pinMode(DOWNSHIFT_PIN, INPUT);
     
     motorDriver.init();
-    motorDriver.setM1Speed(0x0000);
+    motorDriver.setM1Speed(MOTOR_STOPPED);
     
     shiftPID.SetMode(AUTOMATIC);
     shiftPID.SetSampleTime(RATE);
@@ -85,8 +80,10 @@ void setup() {
     
     MsTimer2::set(RATE, controlLoop);
     MsTimer2::start();
-    
-    targetGear = currentGear; //not needed?
+
+    currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX);
+    targetGear = currentGear;
+    lastWorkingGear = currentGear;
 }
 
 
@@ -141,10 +138,9 @@ void controlLoop() {
     currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     
     // Read current (in mA)
+    double meanCurrent = motorDriver.getM1CurrentMilliamps();
     if(DUAL_CHANNEL)
-        meanCurrent = (motorDriver.getM1CurrentMilliamps() + motorDriver.getM2CurrentMilliamps()) / 2;
-    else
-        meanCurrent = motorDriver.getM1CurrentMilliamps();
+        meanCurrent = (meanCurrent + motorDriver.getM2CurrentMilliamps()) / 2;
     
     // Check for and handle jam.
     if (meanCurrent > CUTOFF_CURRENT) {
@@ -155,17 +151,17 @@ void controlLoop() {
     targetPosition = gearPos[targetGear];
       
     // Use PID to set motor speed
-    double motorValue = 0;
+    double motorSpeed = MOTOR_STOPPED;
     if(currentGear != targetGear || meanCurrent > MAX_CURRENT_ERROR){
         shiftPID.Compute();
-        motorValue = int(Output);
+        motorSpeed = Output;
     }
     else
         lastWorkingGear = currentGear;
     
-    motorDriver.setM1Speed(motorValue);
+    motorDriver.setM1Speed(motorSpeed);
     if(DUAL_CHANNEL)
-        motorDriver.setM2Speed(motorValue);
+        motorDriver.setM2Speed(motorSpeed);
     
     //stopIfFault();
 
