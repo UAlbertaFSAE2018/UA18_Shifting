@@ -28,7 +28,7 @@
 
 #define DEBOUNCE_TIME       5       // 5ms
 #define NEUTRAL_LOCK_TIME   1000    // 1000ms / 1s
-#define MAX_CURRENT_ERROR   100     // 100mA
+#define MAX_CURRENT_ERROR   5000     // 5A
 #define MOTOR_STOPPED       0x0000
 
 
@@ -78,8 +78,8 @@ void setup() {
     shiftPID.SetSampleTime(RATE);
     shiftPID.SetOutputLimits(PWM_MIN, PWM_MAX);
     
-    MsTimer2::set(RATE, controlLoop);
-    MsTimer2::start();
+    //MsTimer2::set(RATE, controlLoop);
+    //MsTimer2::start();
 
     currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX);
     targetGear = currentGear;
@@ -103,21 +103,32 @@ void loop() {
     }
 
     // read buttons
-    if(digitalRead(UPSHIFT_PIN) && !upshiftPressed && currentGear < GEAR_MAX){
+    if(digitalRead(UPSHIFT_PIN) && !upshiftPressed && targetGear < GEAR_MAX){
         upshiftPressed = true;
         targetGear += 1;
     }
-    if(digitalRead(DOWNSHIFT_PIN) && !downshiftPressed && currentGear > GEAR_MIN){
+    if(digitalRead(DOWNSHIFT_PIN) && !downshiftPressed && targetGear > GEAR_MIN){
         downshiftPressed = true;
+        timeDownshiftPressed = millis();
         // Neutral lock
-        if(currentGear > GEAR_MIN + 1)
+        if(targetGear > GEAR_MIN + 1)
             targetGear -= 1;
-        else
-            timeDownshiftPressed = millis();
     }
     // Neutral lock
-    if(digitalRead(DOWNSHIFT_PIN) && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && currentGear == GEAR_MIN + 1){
+    if(digitalRead(DOWNSHIFT_PIN) && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1){
         targetGear = GEAR_MIN;
+    }
+
+    if(DEBUG_MODE) {
+        // print the results to the serial monitor:
+        Serial.print("\t sensor = ");
+        Serial.print(currentPosition);
+        Serial.print("\t target pos = "); //temp
+        Serial.print(targetPosition);  //temp
+        Serial.print("\t current gear = ");
+        Serial.print(currentGear);
+        Serial.print("\t target gear = ");
+        Serial.println(targetGear);
     }
 }
 
