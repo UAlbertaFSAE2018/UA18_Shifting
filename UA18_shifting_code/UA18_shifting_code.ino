@@ -5,6 +5,7 @@
 
 
 #define DEBUG_MODE          true
+#define DUAL_CHANNEL        false
 #define BAUD_RATE           9600
 
 // Pinout
@@ -27,6 +28,7 @@
 
 #define DEBOUNCE_TIME       5       // 5ms
 #define NEUTRAL_LOCK_TIME   1000    // 1000ms / 1s
+#define MAX_CURRENT_ERROR   100     // 100mA
 
 
 bool upshiftPressed = false;
@@ -52,18 +54,19 @@ int downshiftState = 0;
 int lastUpshiftState = 0; //previous button state
 int lastDownshiftState = 0;
 int meanCurrent = 0;
+int lastWorkingGear = 0; // is it okay to assume that this is Neutral?
 int gearPos[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add N=174)
 
 double currentPosition;
 double Output;
-double targetPos;
+double targetPosition;
 // PID gain values
 float Kp = 6;
 float Ki = 0.5;
 float Kd = 0.0;
 
 
-PID shiftPID(&currentPosition, &Output, &targetPos, Kp, Ki, Kd, DIRECT); // direction is either DIRECT or REVERSE
+PID shiftPID(&currentPosition, &Output, &targetPosition, Kp, Ki, Kd, DIRECT); // direction is either DIRECT or REVERSE
 DualVNH5019MotorShield motorDriver; //(2, 7, 6, A0, 2, 7, 12, A1); // motor drivers MUST be wired in PARALLEL
 
 
@@ -88,7 +91,7 @@ void setup() {
 
 
 void loop() {
-    //determine current state
+    // determine current state
     currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
     currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     if(digitalRead(UPSHIFT_PIN)) timeUpshiftReleased = millis();
@@ -119,33 +122,6 @@ void loop() {
     if(digitalRead(DOWNSHIFT_PIN) && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && currentGear == GEAR_MIN + 1){
         targetGear = GEAR_MIN;
     }
-
-    
-    
-    //  meanCurrent = (motorDriver.getM1CurrentMilliamps() + motorDriver.getM2CurrentMilliamps()) / 2;
-
-    // could cause gear to almost shift (gets half way) and then give up (would never actually shift)
-    // if (currentGear == targetGear) {  // experimental; trying to figure out how to cut power while not shifting.
-    //   shiftPID.SetMode(MANUAL);
-    // } else {
-    //   shiftPID.SetMode(AUTOMATIC);
-    // }
-    
-    if(DEBUG_MODE) {
-        // print the results to the serial monitor:
-        Serial.print("current (mA) = ");
-        Serial.print(meanCurrent);
-        Serial.print("\t sensor = ");
-        Serial.print(currentPosition);
-        Serial.print("\t target pos = "); //temp
-        Serial.print(targetPos);  //temp
-        Serial.print("\t current gear = ");
-        Serial.print(currentGear);
-        Serial.print("\t target gear = ");
-        Serial.println(targetGear);
-    }
-    
-    //delay(10);  // wait 10ms
 }
 
 
@@ -160,21 +136,51 @@ long mapGear(long x, long in_min, long in_max, long out_min, long out_max) {
 
 // Motor PID loop
 void controlLoop() {
-    if(DEBUG_MODE) Serial.println("PID running");
+    // determine current state
+    currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
+    currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     
-    currentPosition = analogRead(POSITION_SENSOR_PIN);
-    meanCurrent = motorDriver.getM1CurrentMilliamps();// + motorDriver.getM2CurrentMilliamps()) / 2;  // read current (in mA)
-    if (meanCurrent > CUTOFF_CURRENT) {    // CUTOFF_CURRENT is defined in setup
-        targetPos = gearPos[currentGear];
+    // Read current (in mA)
+    if(DUAL_CHANNEL)
+        meanCurrent = (motorDriver.getM1CurrentMilliamps() + motorDriver.getM2CurrentMilliamps()) / 2;
+    else
+        meanCurrent = motorDriver.getM1CurrentMilliamps();
+    
+    // Check for and handle jam.
+    if (meanCurrent > CUTOFF_CURRENT) {
         if(DEBUG_MODE) Serial.println("JAM DETECTED");
-    } else {
-        targetPos = gearPos[targetGear];       
+        targetGear = lastWorkingGear;
     }
+    
+    targetPosition = gearPos[targetGear];
       
-    shiftPID.Compute();                    
-    int motorValue = int(Output);           
+    // Use PID to set motor speed
+    double motorValue = 0;
+    if(currentGear != targetGear || meanCurrent > MAX_CURRENT_ERROR){
+        shiftPID.Compute();
+        motorValue = int(Output);
+    }
+    else
+        lastWorkingGear = currentGear;
+    
     motorDriver.setM1Speed(motorValue);
-    //motorDriver.setM2Speed(motorValue);
-    // stopIfFault();
+    if(DUAL_CHANNEL)
+        motorDriver.setM2Speed(motorValue);
+    
+    //stopIfFault();
+
+    if(DEBUG_MODE) {
+        // print the results to the serial monitor:
+        Serial.print("current (mA) = ");
+        Serial.print(meanCurrent);
+        Serial.print("\t sensor = ");
+        Serial.print(currentPosition);
+        Serial.print("\t target pos = "); //temp
+        Serial.print(targetPosition);  //temp
+        Serial.print("\t current gear = ");
+        Serial.print(currentGear);
+        Serial.print("\t target gear = ");
+        Serial.println(targetGear);
+    }
 }
 
