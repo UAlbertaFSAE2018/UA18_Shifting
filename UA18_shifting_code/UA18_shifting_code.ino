@@ -3,6 +3,10 @@
 #include <DualVNH5019MotorShield.h>
 #include <PID_v1.h>
 
+
+#define DEBUG_MODE  true
+#define BAUD_RATE   9600
+
 //**Pinout**//
 #define POSITION_SENSOR_PIN A3  // analog pin that the potentiometer is attached to
 #define DOWNSHIFT_PIN       5   // upshift/downshift buttons have pulldown resistors
@@ -14,12 +18,23 @@
 //**Setup**//
 #define SENSOR_MIN      98      // reading in neutral (actual=105) - backlash (50 for now) (new is actually 272)
 #define SENSOR_MAX      795     // reading in 4th (actual=790) + backlash (50 for now) (new is actually 982)
+#define GEAR_MIN        0       // for neutral
+#define GEAR_MAX        4       // 4th gear
 #define PWM_MIN         -400    // VNH5019 shield PWM min & max
 #define PWM_MAX         400     // Min/Max are -400/400, set low for safety
 #define RATE            1       //ms, or 1kHz. Sets PID rate
-#define CUTOFF_CURRENT  9000    // the max amperage before it detects a jam (in mA)
+#define CUTOFF_CURRENT  9000    // the max amperage before it detects a jam (in mA
+
+#define DEBOUNCE_TIME   5       // 5ms
+
 
 DualVNH5019MotorShield motorDriver; //(2, 7, 6, A0, 2, 7, 12, A1); // motor drivers MUST be wired in PARALLEL
+
+// ~50 days to roll over so should be fine
+unsigned long timeUpshiftReleased = millis();
+unsigned long timeDownshiftReleased = millis();
+bool upshiftPressed = false;
+bool downshiftPressed = false;
 
 unsigned long time;
 unsigned long neutralTimer;
@@ -46,12 +61,15 @@ int gearPos[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add 
 float Kp = 6;
 float Ki = 0.5;
 float Kd = 0.0;
-double targetPos, currentPos, Output;
+double targetPos, Output;
 PID shiftPID(&currentPos, &Output, &targetPos, Kp, Ki, Kd, DIRECT); // direction is either DIRECT or REVERSE
 
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(BAUD_RATE);
+    
+    pinMode(UPSHIFT_PIN, INPUT);
+    pinMode(DOWNSHIFT_PIN, INPUT);
     
     motorDriver.init();
     motorDriver.setM1Speed(0x0000);
@@ -63,48 +81,37 @@ void setup() {
     MsTimer2::set(RATE, controlLoop);
     MsTimer2::start();
     
-    pinMode(UPSHIFT_PIN, INPUT);
-    pinMode(DOWNSHIFT_PIN, INPUT);
-    
     targetGear = currentGear; //not needed?
 }
 
 void loop() {
+    //determine current state
+    double currentPos = analogRead(POSITION_SENSOR_PIN); // read the analog in value
+    currentGear = map(currentPos, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
+    
+    // debouncing
+    if(upshiftPressed && millis() - timeUpshiftReleased >= DEBOUNCE_TIME){
+        upshiftPressed = false;
+    }
+    if(downshiftPressed && millis() - timeDownshiftReleased >= DEBOUNCE_TIME){
+        downshiftPressed = false;
+    }
+
+    // read buttons
+    if(digitalRead(UPSHIFT_PIN) && !upshiftPressed && currentGear < GEAR_MAX){
+        targetGear += 1;
+        upshiftPressed = true;
+        timeUpshiftReleased = millis();
+    }
+    if(digitalRead(DOWNSHIFT_PIN) && !downshiftPressed && currentGear > GEAR_MIN){
+        targetGear -= 1;
+        downshiftPressed = true;
+        timeDownshiftReleased = millis();
+    }
+
+    
     
     //  meanCurrent = (motorDriver.getM1CurrentMilliamps() + motorDriver.getM2CurrentMilliamps()) / 2;
-      
-    upshiftState = digitalRead(UPSHIFT_PIN); // read the pushbutton input pin
-    downshiftState = digitalRead(DOWNSHIFT_PIN);
-    
-    currentPos = analogRead(POSITION_SENSOR_PIN); // read the analog in value
-    currentGear = map(currentPos, SENSOR_MIN, SENSOR_MAX, 0, 4); // maps the sensor to a range of 0-4 (0=N)
-    
-    if (upshiftState != lastUpshiftState) {              // checks to see if button state changed
-        if ((upshiftState == HIGH) && (currentGear < 4)) { // if the current state is HIGH then the button went from off to on
-        targetGear = currentGear + 1;                                   // for each press of upshift, targetGear will shift up a gear while <4
-        //**ignition-cut code goes here**//
-    
-        }
-        delay(5);  // debounce
-    }
-    lastUpshiftState = upshiftState;         // save the current state as the last state, for next time through the loop
-    
-    if (downshiftState != lastDownshiftState) {
-        if (downshiftState == HIGH) {
-            if (currentGear > 1) {
-                targetGear = currentGear - 1;  //instead of targetGear --
-            } else {                    
-                neutralTimer = millis();
-                delay(1000);
-                time = millis();
-                if ((digitalRead(DOWNSHIFT_PIN) == HIGH) && (time - neutralTimer >= 1000)) {
-                    targetGear = 0;
-                }
-            }
-            delay(5);  // debounce
-        }
-    }
-    lastDownshiftState = downshiftState;
     
     // if (currentGear == targetGear) {  // experimental; trying to figure out how to cut power while not shifting.
     //   shiftPID.SetMode(MANUAL);
@@ -112,28 +119,31 @@ void loop() {
     //   shiftPID.SetMode(AUTOMATIC);
     // }
     
-    // print the results to the serial monitor:
-    Serial.print("current (mA) = ");
-    Serial.print(meanCurrent);
-    Serial.print("\t sensor = ");
-    Serial.print(currentPos);
-    Serial.print("\t target pos = "); //temp
-    Serial.print(targetPos);  //temp
-    Serial.print("\t current gear = ");
-    Serial.print(currentGear);
-    Serial.print("\t target gear = ");
-    Serial.println(targetGear);
+    if(DEBUG_MODE){
+        // print the results to the serial monitor:
+        Serial.print("current (mA) = ");
+        Serial.print(meanCurrent);
+        Serial.print("\t sensor = ");
+        Serial.print(currentPos);
+        Serial.print("\t target pos = "); //temp
+        Serial.print(targetPos);  //temp
+        Serial.print("\t current gear = ");
+        Serial.print(currentGear);
+        Serial.print("\t target gear = ");
+        Serial.println(targetGear);
+    }
     
-    delay(10);  // wait 5ms
+    delay(10);  // wait 10ms
 }
 
 void controlLoop() {  // Motor PID loop
+    if(DEBUG_MODE) Serial.println("PID running");
     
-    currentPos = analogRead(POSITION_SENSOR_PIN);
+    double currentPos = analogRead(POSITION_SENSOR_PIN);
     meanCurrent = motorDriver.getM1CurrentMilliamps();// + motorDriver.getM2CurrentMilliamps()) / 2;  // read current (in mA)
     if (meanCurrent > CUTOFF_CURRENT) {    // CUTOFF_CURRENT is defined in setup
         targetPos = gearPos[currentGear];
-        //Serial.print("JAM DETECTED");   // for debugging
+        if(DEBUG_MODE) Serial.println("JAM DETECTED");
     } else {
         targetPos = gearPos[targetGear];       
     }
