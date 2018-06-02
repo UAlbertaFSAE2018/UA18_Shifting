@@ -28,7 +28,7 @@
 
 #define DEBOUNCE_TIME       5       // 5ms
 #define NEUTRAL_LOCK_TIME   1000    // 1000ms / 1s
-#define MAX_CURRENT_ERROR   5000     // 5A
+#define MAX_CURRENT_ERROR   1000     // 5A
 #define MOTOR_STOPPED       0x0000
 
 
@@ -73,13 +73,15 @@ void setup() {
     
     motorDriver.init();
     motorDriver.setM1Speed(MOTOR_STOPPED);
+    if(DUAL_CHANNEL)
+        motorDriver.setM2Speed(MOTOR_STOPPED);
     
     shiftPID.SetMode(AUTOMATIC);
     shiftPID.SetSampleTime(RATE);
     shiftPID.SetOutputLimits(PWM_MIN, PWM_MAX);
     
-    //MsTimer2::set(RATE, controlLoop);
-    //MsTimer2::start();
+    MsTimer2::set(RATE, controlLoopOld);
+    MsTimer2::start();
 
     currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX);
     targetGear = currentGear;
@@ -117,18 +119,6 @@ void loop() {
     // Neutral lock
     if(digitalRead(DOWNSHIFT_PIN) && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1){
         targetGear = GEAR_MIN;
-    }
-
-    if(DEBUG_MODE) {
-        // print the results to the serial monitor:
-        Serial.print("\t sensor = ");
-        Serial.print(currentPosition);
-        Serial.print("\t target pos = "); //temp
-        Serial.print(targetPosition);  //temp
-        Serial.print("\t current gear = ");
-        Serial.print(currentGear);
-        Serial.print("\t target gear = ");
-        Serial.println(targetGear);
     }
 }
 
@@ -175,6 +165,40 @@ void controlLoop() {
         motorDriver.setM2Speed(motorSpeed);
     
     //stopIfFault();
+
+    if(DEBUG_MODE) {
+        // print the results to the serial monitor:
+        Serial.print("current (mA) = ");
+        Serial.print(meanCurrent);
+        Serial.print("\t sensor = ");
+        Serial.print(currentPosition);
+        Serial.print("\t target pos = "); //temp
+        Serial.print(targetPosition);  //temp
+        Serial.print("\t current gear = ");
+        Serial.print(currentGear);
+        Serial.print("\t target gear = ");
+        Serial.println(targetGear);
+    }
+}
+
+
+void controlLoopOld() {  // Motor PID loop
+
+  double currentPos = analogRead(POSITION_SENSOR_PIN);
+  double targetPosition;
+  double meanCurrent = motorDriver.getM1CurrentMilliamps();// + md.getM2CurrentMilliamps()) / 2;  // read current (in mA)
+  if (meanCurrent > CUTOFF_CURRENT) {    // cutoffCurrent is defined in setup
+    targetPosition = gearPos[currentGear];
+    //Serial.print("JAM DETECTED");   // for debugging
+  } else {
+    targetPosition = gearPos[targetGear];       
+  }
+  
+  shiftPID.Compute();                    
+  int motorValue = int(Output);           
+  motorDriver.setM1Speed(motorValue);
+  //md.setM2Speed(motorValue);
+  // stopIfFault();
 
     if(DEBUG_MODE) {
         // print the results to the serial monitor:
