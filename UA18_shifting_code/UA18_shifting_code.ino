@@ -79,8 +79,9 @@ void setup() {
     
     motorDriver.init();
     motorDriver.setM1Speed(MOTOR_STOPPED);
-    if(DUAL_CHANNEL)
+    if(DUAL_CHANNEL) {
         motorDriver.setM2Speed(MOTOR_STOPPED);
+    }
     
     shiftPID.SetMode(AUTOMATIC);
     shiftPID.SetSampleTime(RATE);
@@ -113,29 +114,30 @@ void loop() {
     }
     
     // debouncing
-    if(!upshiftButtonDepressed && upshiftRecentlyPressed && currentTime - timeUpshiftReleased >= DEBOUNCE_TIME){
+    if(!upshiftButtonDepressed && upshiftRecentlyPressed && currentTime - timeUpshiftReleased >= DEBOUNCE_TIME) {
         upshiftRecentlyPressed = false;
     }
-    if(!downshiftButtonDepressed && downshiftRecentlyPressed && currentTime - timeDownshiftReleased >= DEBOUNCE_TIME){
+    if(!downshiftButtonDepressed && downshiftRecentlyPressed && currentTime - timeDownshiftReleased >= DEBOUNCE_TIME) {
         downshiftRecentlyPressed = false;
     }
 
     // read buttons
-    if(upshiftButtonDepressed && !upshiftRecentlyPressed && targetGear < GEAR_MAX){
+    if(upshiftButtonDepressed && !upshiftRecentlyPressed && targetGear < GEAR_MAX) {
         upshiftRecentlyPressed = true;
         targetGear += 1;
         MsTimer2::start();
     }
-    if(downshiftButtonDepressed && !downshiftRecentlyPressed && targetGear > GEAR_MIN){
+    if(downshiftButtonDepressed && !downshiftRecentlyPressed && targetGear > GEAR_MIN) {
         downshiftRecentlyPressed = true;
         timeDownshiftPressed = currentTime;
         // Neutral lock
-        if(targetGear > GEAR_MIN + 1)
+        if(targetGear > GEAR_MIN + 1) {
             targetGear -= 1;
+        }
         MsTimer2::start();
     }
     // Neutral lock
-    if(downshiftButtonDepressed && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1){
+    if(downshiftButtonDepressed && currentTime - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1) {
         targetGear = GEAR_MIN;
         MsTimer2::start();
     }
@@ -172,7 +174,7 @@ void controlLoop() {
       
     // Use PID to set motor speed
     double motorSpeed = MOTOR_STOPPED;
-    if(currentGear != targetGear || meanCurrent > MAX_CURRENT_ERROR){
+    if(currentGear != targetGear || meanCurrent > MAX_CURRENT_ERROR) {
         shiftPID.Compute();
         motorSpeed = Output;
     }
@@ -182,8 +184,9 @@ void controlLoop() {
     }
     
     motorDriver.setM1Speed(motorSpeed);
-    if(DUAL_CHANNEL)
+    if(DUAL_CHANNEL) {
         motorDriver.setM2Speed(motorSpeed);
+    }
     
     //stopIfFault();
 
@@ -206,22 +209,22 @@ void controlLoop() {
 
 void controlLoopOld() {  // Motor PID loop
 
-  double currentPos = analogRead(POSITION_SENSOR_PIN);
-  double targetPosition;
-  double meanCurrent = motorDriver.getM1CurrentMilliamps();// + md.getM2CurrentMilliamps()) / 2;  // read current (in mA)
-  if (meanCurrent > CUTOFF_CURRENT) {    // cutoffCurrent is defined in setup
-    targetPosition = gearPos[currentGear];
-    //Serial.print("JAM DETECTED");   // for debugging
-  } else {
-    targetPosition = gearPos[targetGear];       
-  }
-  
-  shiftPID.Compute();                    
-  int motorValue = int(Output);           
-  motorDriver.setM1Speed(motorValue);
-  //md.setM2Speed(motorValue);
-  // stopIfFault();
-
+     double currentPos = analogRead(POSITION_SENSOR_PIN);
+    double targetPosition;
+    double meanCurrent = motorDriver.getM1CurrentMilliamps();// + md.getM2CurrentMilliamps()) / 2;  // read current (in mA)
+    if (meanCurrent > CUTOFF_CURRENT) {    // cutoffCurrent is defined in setup
+        targetPosition = gearPos[currentGear];
+        //Serial.print("JAM DETECTED");   // for debugging
+    } else {
+        targetPosition = gearPos[targetGear];       
+    }
+      
+    shiftPID.Compute();                    
+    int motorValue = int(Output);           
+    motorDriver.setM1Speed(motorValue);
+    //md.setM2Speed(motorValue);
+    // stopIfFault();
+    
     if(DEBUG_MODE) {
         // print the results to the serial monitor:
         Serial.print("old  ");
