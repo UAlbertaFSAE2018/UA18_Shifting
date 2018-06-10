@@ -53,9 +53,10 @@ int targetGear;
 int lastWorkingGear;
 int upshiftButtonDepressed = 0; //current button state
 int downshiftButtonDepressed = 0;
-int gearPos[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add N=174)
+int gear2position[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add N=174)
 
 double meanCurrent;
+double motorSpeed = MOTOR_STOPPED;
 double currentPosition;
 double Output;
 double targetPosition;
@@ -163,15 +164,6 @@ void loop() {
 }
 
 
-// This function is needed for gears to be mapped proportionally
-long mapGear(long x, long in_min, long in_max, long out_min, long out_max) {
-    // default map behavior:
-    // return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-    
-    return (x - in_min) * (out_max - out_min + 1) / (in_max - in_min + 1) + out_min;
-}
-
-
 // Motor PID loop
 // Should be as short as possible
 void controlLoop() {
@@ -189,10 +181,10 @@ void controlLoop() {
         targetGear = lastWorkingGear;
     }
     
-    targetPosition = gearPos[targetGear];
+    targetPosition = gear2position[targetGear];
       
     // Use PID to set motor speed
-    double motorSpeed = MOTOR_STOPPED;
+    motorSpeed = MOTOR_STOPPED;
     if(currentGear != targetGear || meanCurrent > MAX_CURRENT_ERROR) {
         shiftPID.Compute();
         motorSpeed = Output;
@@ -213,20 +205,27 @@ void controlLoop() {
 
 // Old motor PID loop
 void controlLoopOld() {
-    double currentPos = analogRead(POSITION_SENSOR_PIN);
-    double targetPosition;
-    double meanCurrent = motorDriver.getM1CurrentMilliamps();// + md.getM2CurrentMilliamps()) / 2;  // read current (in mA)
+    currentPosition = analogRead(POSITION_SENSOR_PIN);
+    meanCurrent = motorDriver.getM1CurrentMilliamps();// + md.getM2CurrentMilliamps()) / 2;  // read current (in mA)
     if (meanCurrent > CUTOFF_CURRENT) {    // cutoffCurrent is defined in setup
-        targetPosition = gearPos[currentGear];
-        //Serial.print("JAM DETECTED");   // for debugging
+        targetPosition = gear2position[currentGear];
     } else {
-        targetPosition = gearPos[targetGear];       
+        targetPosition = gear2position[targetGear];       
     }
       
     shiftPID.Compute();                    
     int motorValue = int(Output);           
     motorDriver.setM1Speed(motorValue);
-    // md.setM2Speed(motorValue);
+    //md.setM2Speed(motorValue);
     // stopIfFault();
+}
+
+
+// This function is needed for gears to be mapped proportionally
+long mapGear(long x, long in_min, long in_max, long out_min, long out_max) {
+    // default map behavior:
+    // return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    
+    return (x - in_min) * (out_max - out_min + 1) / (in_max - in_min + 1) + out_min;
 }
 
