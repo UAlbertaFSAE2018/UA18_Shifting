@@ -39,19 +39,20 @@
 //unsigned char getM2Fault();
 
 
-bool upshiftPressed = false;
-bool downshiftPressed = false;
+bool upshiftRecentlyPressed = false;
+bool downshiftRecentlyPressed = false;
 // ~50 days to roll over so should be fine
 unsigned long timeUpshiftReleased = millis();
 unsigned long timeDownshiftReleased = millis();
 unsigned long timeDownshiftPressed = millis();
+unsigned long currentTime = millis();
 
 int sensorValue; // value read from the pot
 int currentGear;
 int targetGear; 
 int lastWorkingGear;
-int upshiftState = 0; //current button state
-int downshiftState = 0;
+int upshiftButtonDepressed = 0; //current button state
+int downshiftButtonDepressed = 0;
 int gearPos[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add N=174)
 
 double currentPosition;
@@ -86,7 +87,7 @@ void setup() {
     shiftPID.SetOutputLimits(PWM_MIN, PWM_MAX);
     
     MsTimer2::set(RATE, controlLoop);
-    MsTimer2::start();
+    //MsTimer2::start();
     
     // determine current state
     currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
@@ -97,35 +98,44 @@ void setup() {
 
 
 void loop() {
-    upshiftState = digitalRead(UPSHIFT_PIN); // read the pushbutton input pin
-    downshiftState = digitalRead(DOWNSHIFT_PIN);
-    if(upshiftState) timeUpshiftReleased = millis();
-    if(downshiftState) timeDownshiftReleased = millis();
+    upshiftButtonDepressed = digitalRead(UPSHIFT_PIN);
+    downshiftButtonDepressed = digitalRead(DOWNSHIFT_PIN);
+    currentTime = millis();
+    
+    // continually updates time until released
+    if(upshiftButtonDepressed) {
+        timeUpshiftReleased = currentTime;
+    }
+    if(downshiftButtonDepressed) {
+        timeDownshiftReleased = currentTime;
+    } else {
+        timeDownshiftPressed = currentTime; // ensures downshift button must be held to downshift
+    }
     
     // debouncing
-    if(!upshiftState && upshiftPressed && millis() - timeUpshiftReleased >= DEBOUNCE_TIME){
-        upshiftPressed = false;
+    if(!upshiftButtonDepressed && upshiftRecentlyPressed && currentTime - timeUpshiftReleased >= DEBOUNCE_TIME){
+        upshiftRecentlyPressed = false;
     }
-    if(!downshiftState && downshiftPressed && millis() - timeDownshiftReleased >= DEBOUNCE_TIME){
-        downshiftPressed = false;
+    if(!downshiftButtonDepressed && downshiftRecentlyPressed && currentTime - timeDownshiftReleased >= DEBOUNCE_TIME){
+        downshiftRecentlyPressed = false;
     }
 
     // read buttons
-    if(upshiftState && !upshiftPressed && targetGear < GEAR_MAX){
-        upshiftPressed = true;
+    if(upshiftButtonDepressed && !upshiftRecentlyPressed && targetGear < GEAR_MAX){
+        upshiftRecentlyPressed = true;
         targetGear += 1;
         MsTimer2::start();
     }
-    if(downshiftState && !downshiftPressed && targetGear > GEAR_MIN){
-        downshiftPressed = true;
-        timeDownshiftPressed = millis();
+    if(downshiftButtonDepressed && !downshiftRecentlyPressed && targetGear > GEAR_MIN){
+        downshiftRecentlyPressed = true;
+        timeDownshiftPressed = currentTime;
         // Neutral lock
         if(targetGear > GEAR_MIN + 1)
             targetGear -= 1;
         MsTimer2::start();
     }
     // Neutral lock
-    if(downshiftState && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1){
+    if(downshiftButtonDepressed && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1){
         targetGear = GEAR_MIN;
         MsTimer2::start();
     }
