@@ -23,12 +23,12 @@
 #define GEAR_MAX            4       // 4th gear
 #define PWM_MIN             -400    // VNH5019 shield PWM min & max
 #define PWM_MAX             400     // Min/Max are -400/400, set low for safety
-#define RATE                1       // ms, or 1kHz. Sets PID rate
-#define CUTOFF_CURRENT      9000    // the max amperage before it detects a jam (in mA
+#define RATE                10       // ms, or 1kHz. Sets PID rate
+#define CUTOFF_CURRENT      10000    // the max amperage before it detects a jam (in mA
 
 #define DEBOUNCE_TIME       5       // 5ms
 #define NEUTRAL_LOCK_TIME   1000    // 1000ms / 1s
-#define MAX_CURRENT_ERROR   1000     // 5A
+#define MAX_CURRENT_ERROR   1000     // 1A
 #define MOTOR_STOPPED       0x0000
 
 
@@ -50,14 +50,19 @@ int sensorValue; // value read from the pot
 int currentGear;
 int targetGear; 
 int lastWorkingGear;
+int upshiftState = 0; //current button state
+int downshiftState = 0;
 int gearPos[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add N=174)
 
 double currentPosition;
 double Output;
 double targetPosition;
 // PID gain values
-float Kp = 6;
-float Ki = 0.5;
+//float Kp = 6;
+//float Ki = 0.5;
+//float Kd = 0.0;
+float Kp = 1.0;
+float Ki = 0.1;
 float Kd = 0.0;
 
 
@@ -80,45 +85,49 @@ void setup() {
     shiftPID.SetSampleTime(RATE);
     shiftPID.SetOutputLimits(PWM_MIN, PWM_MAX);
     
-    MsTimer2::set(RATE, controlLoopOld);
+    MsTimer2::set(RATE, controlLoop);
     MsTimer2::start();
-
-    currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX);
+    
+    // determine current state
+    currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
+    currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     targetGear = currentGear;
     lastWorkingGear = currentGear;
 }
 
 
 void loop() {
-    // determine current state
-    currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
-    currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
-    if(digitalRead(UPSHIFT_PIN)) timeUpshiftReleased = millis();
-    if(digitalRead(DOWNSHIFT_PIN)) timeDownshiftReleased = millis();
+    upshiftState = digitalRead(UPSHIFT_PIN); // read the pushbutton input pin
+    downshiftState = digitalRead(DOWNSHIFT_PIN);
+    if(upshiftState) timeUpshiftReleased = millis();
+    if(downshiftState) timeDownshiftReleased = millis();
     
     // debouncing
-    if(!digitalRead(UPSHIFT_PIN) && upshiftPressed && millis() - timeUpshiftReleased >= DEBOUNCE_TIME){
+    if(!upshiftState && upshiftPressed && millis() - timeUpshiftReleased >= DEBOUNCE_TIME){
         upshiftPressed = false;
     }
-    if(!digitalRead(DOWNSHIFT_PIN) && downshiftPressed && millis() - timeDownshiftReleased >= DEBOUNCE_TIME){
+    if(!downshiftState && downshiftPressed && millis() - timeDownshiftReleased >= DEBOUNCE_TIME){
         downshiftPressed = false;
     }
 
     // read buttons
-    if(digitalRead(UPSHIFT_PIN) && !upshiftPressed && targetGear < GEAR_MAX){
+    if(upshiftState && !upshiftPressed && targetGear < GEAR_MAX){
         upshiftPressed = true;
         targetGear += 1;
+        MsTimer2::start();
     }
-    if(digitalRead(DOWNSHIFT_PIN) && !downshiftPressed && targetGear > GEAR_MIN){
+    if(downshiftState && !downshiftPressed && targetGear > GEAR_MIN){
         downshiftPressed = true;
         timeDownshiftPressed = millis();
         // Neutral lock
         if(targetGear > GEAR_MIN + 1)
             targetGear -= 1;
+        MsTimer2::start();
     }
     // Neutral lock
-    if(digitalRead(DOWNSHIFT_PIN) && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1){
+    if(downshiftState && millis() - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1){
         targetGear = GEAR_MIN;
+        MsTimer2::start();
     }
 }
 
@@ -157,8 +166,10 @@ void controlLoop() {
         shiftPID.Compute();
         motorSpeed = Output;
     }
-    else
+    else{
         lastWorkingGear = currentGear;
+        MsTimer2::stop();
+    }
     
     motorDriver.setM1Speed(motorSpeed);
     if(DUAL_CHANNEL)
@@ -168,6 +179,7 @@ void controlLoop() {
 
     if(DEBUG_MODE) {
         // print the results to the serial monitor:
+        Serial.print("ctrl ");
         Serial.print("current (mA) = ");
         Serial.print(meanCurrent);
         Serial.print("\t sensor = ");
@@ -202,6 +214,7 @@ void controlLoopOld() {  // Motor PID loop
 
     if(DEBUG_MODE) {
         // print the results to the serial monitor:
+        Serial.print("old  ");
         Serial.print("current (mA) = ");
         Serial.print(meanCurrent);
         Serial.print("\t sensor = ");
