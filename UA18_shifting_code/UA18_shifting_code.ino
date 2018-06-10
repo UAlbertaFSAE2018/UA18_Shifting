@@ -45,7 +45,7 @@ bool downshiftRecentlyPressed = false;
 unsigned long timeUpshiftReleased = millis();
 unsigned long timeDownshiftReleased = millis();
 unsigned long timeDownshiftPressed = millis();
-unsigned long currentTime = millis();
+unsigned long currentMillis = millis();
 
 int sensorValue; // value read from the pot
 int currentGear;
@@ -55,6 +55,7 @@ int upshiftButtonDepressed = 0; //current button state
 int downshiftButtonDepressed = 0;
 int gearPos[5] = {98,284,442,616,795}; //(N is actually 1st. If using 5spd, add N=174)
 
+double meanCurrent;
 double currentPosition;
 double Output;
 double targetPosition;
@@ -95,29 +96,31 @@ void setup() {
     currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     targetGear = currentGear;
     lastWorkingGear = currentGear;
+    
+    controlLoop(); // initialize values
 }
 
 
 void loop() {
     upshiftButtonDepressed = digitalRead(UPSHIFT_PIN);
     downshiftButtonDepressed = digitalRead(DOWNSHIFT_PIN);
-    currentTime = millis();
+    currentMillis = millis();
     
     // continually updates time until released
     if(upshiftButtonDepressed) {
-        timeUpshiftReleased = currentTime;
+        timeUpshiftReleased = currentMillis;
     }
     if(downshiftButtonDepressed) {
-        timeDownshiftReleased = currentTime;
+        timeDownshiftReleased = currentMillis;
     } else {
-        timeDownshiftPressed = currentTime; // ensures downshift button must be held to downshift
+        timeDownshiftPressed = currentMillis; // ensures downshift button must be held to downshift
     }
     
     // debouncing
-    if(!upshiftButtonDepressed && upshiftRecentlyPressed && currentTime - timeUpshiftReleased >= DEBOUNCE_TIME) {
+    if(!upshiftButtonDepressed && upshiftRecentlyPressed && currentMillis - timeUpshiftReleased >= DEBOUNCE_TIME) {
         upshiftRecentlyPressed = false;
     }
-    if(!downshiftButtonDepressed && downshiftRecentlyPressed && currentTime - timeDownshiftReleased >= DEBOUNCE_TIME) {
+    if(!downshiftButtonDepressed && downshiftRecentlyPressed && currentMillis - timeDownshiftReleased >= DEBOUNCE_TIME) {
         downshiftRecentlyPressed = false;
     }
 
@@ -129,7 +132,7 @@ void loop() {
     }
     if(downshiftButtonDepressed && !downshiftRecentlyPressed && targetGear > GEAR_MIN) {
         downshiftRecentlyPressed = true;
-        timeDownshiftPressed = currentTime;
+        timeDownshiftPressed = currentMillis;
         // Neutral lock
         if(targetGear > GEAR_MIN + 1) {
             targetGear -= 1;
@@ -137,9 +140,25 @@ void loop() {
         MsTimer2::start();
     }
     // Neutral lock
-    if(downshiftButtonDepressed && currentTime - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1) {
+    if(downshiftButtonDepressed && currentMillis - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1) {
         targetGear = GEAR_MIN;
         MsTimer2::start();
+    }
+
+    // can't print during interrupt
+    if(DEBUG_MODE) {
+        // print the results to the serial monitor:
+        Serial.print("ctrl ");
+        Serial.print("current (mA) = ");
+        Serial.print(meanCurrent);
+        Serial.print("\t sensor = ");
+        Serial.print(currentPosition);
+        Serial.print("\t target pos = "); //temp
+        Serial.print(targetPosition);  //temp
+        Serial.print("\t current gear = ");
+        Serial.print(currentGear);
+        Serial.print("\t target gear = ");
+        Serial.println(targetGear);
     }
 }
 
@@ -154,19 +173,19 @@ long mapGear(long x, long in_min, long in_max, long out_min, long out_max) {
 
 
 // Motor PID loop
+// Should be as short as possible
 void controlLoop() {
     // determine current state
     currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
     currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     
     // Read current (in mA)
-    double meanCurrent = motorDriver.getM1CurrentMilliamps();
+    meanCurrent = motorDriver.getM1CurrentMilliamps();
     if(DUAL_CHANNEL)
         meanCurrent = (meanCurrent + motorDriver.getM2CurrentMilliamps()) / 2;
     
     // Check for and handle jam.
     if (meanCurrent > CUTOFF_CURRENT) {
-        if(DEBUG_MODE) Serial.println("JAM DETECTED");
         targetGear = lastWorkingGear;
     }
     
@@ -189,27 +208,12 @@ void controlLoop() {
     }
     
     //stopIfFault();
-
-    if(DEBUG_MODE) {
-        // print the results to the serial monitor:
-        Serial.print("ctrl ");
-        Serial.print("current (mA) = ");
-        Serial.print(meanCurrent);
-        Serial.print("\t sensor = ");
-        Serial.print(currentPosition);
-        Serial.print("\t target pos = "); //temp
-        Serial.print(targetPosition);  //temp
-        Serial.print("\t current gear = ");
-        Serial.print(currentGear);
-        Serial.print("\t target gear = ");
-        Serial.println(targetGear);
-    }
 }
 
 
-void controlLoopOld() {  // Motor PID loop
-
-     double currentPos = analogRead(POSITION_SENSOR_PIN);
+// Old motor PID loop
+void controlLoopOld() {
+    double currentPos = analogRead(POSITION_SENSOR_PIN);
     double targetPosition;
     double meanCurrent = motorDriver.getM1CurrentMilliamps();// + md.getM2CurrentMilliamps()) / 2;  // read current (in mA)
     if (meanCurrent > CUTOFF_CURRENT) {    // cutoffCurrent is defined in setup
@@ -222,22 +226,7 @@ void controlLoopOld() {  // Motor PID loop
     shiftPID.Compute();                    
     int motorValue = int(Output);           
     motorDriver.setM1Speed(motorValue);
-    //md.setM2Speed(motorValue);
+    // md.setM2Speed(motorValue);
     // stopIfFault();
-    
-    if(DEBUG_MODE) {
-        // print the results to the serial monitor:
-        Serial.print("old  ");
-        Serial.print("current (mA) = ");
-        Serial.print(meanCurrent);
-        Serial.print("\t sensor = ");
-        Serial.print(currentPosition);
-        Serial.print("\t target pos = "); //temp
-        Serial.print(targetPosition);  //temp
-        Serial.print("\t current gear = ");
-        Serial.print(currentGear);
-        Serial.print("\t target gear = ");
-        Serial.println(targetGear);
-    }
 }
 
