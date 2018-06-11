@@ -19,16 +19,16 @@
 // Setup
 #define SENSOR_MIN          98      // reading in neutral (actual=105) - backlash (50 for now) (new is actually 272)
 #define SENSOR_MAX          795     // reading in 4th (actual=790) + backlash (50 for now) (new is actually 982)
+#define SENSOR_ERROR_MAX    10      // threshold when the motor is shut off
 #define GEAR_MIN            0       // for neutral
 #define GEAR_MAX            4       // 4th gear
 #define PWM_MIN             -400    // VNH5019 shield PWM min & max
 #define PWM_MAX             400     // Min/Max are -400/400, set low for safety
-#define RATE                10       // ms, or 1kHz. Sets PID rate
-#define CUTOFF_CURRENT      10000    // the max amperage before it detects a jam (in mA
+#define RATE                1       // ms, or 1kHz. Sets PID rate
+#define CUTOFF_CURRENT      10000   // the max amperage before it detects a jam (in mA
 
 #define DEBOUNCE_TIME       5       // 5ms
 #define NEUTRAL_LOCK_TIME   1000    // 1000ms / 1s
-#define MAX_CURRENT_ERROR   1000     // 1A
 #define MOTOR_STOPPED       0x0000
 
 
@@ -48,7 +48,7 @@ unsigned long timeDownshiftPressed = millis();
 unsigned long currentMillis = millis();
 
 int sensorValue; // value read from the pot
-int currentGear;
+//int currentGear;
 int targetGear; 
 int lastWorkingGear;
 int upshiftButtonDepressed = 0; //current button state
@@ -64,8 +64,8 @@ double targetPosition;
 //float Kp = 6;
 //float Ki = 0.5;
 //float Kd = 0.0;
-float Kp = 1.0;
-float Ki = 0.1;
+float Kp = 3.0;
+float Ki = 0.3;
 float Kd = 0.0;
 
 
@@ -94,7 +94,7 @@ void setup() {
     
     // determine current state
     currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
-    currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
+    int currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     targetGear = currentGear;
     lastWorkingGear = currentGear;
     
@@ -137,8 +137,8 @@ void loop() {
         // Neutral lock
         if(targetGear > GEAR_MIN + 1) {
             targetGear -= 1;
+            MsTimer2::start();
         }
-        MsTimer2::start();
     }
     // Neutral lock
     if(downshiftButtonDepressed && currentMillis - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1) {
@@ -148,6 +148,7 @@ void loop() {
 
     // can't print during interrupt
     if(DEBUG_MODE) {
+        int currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
         // print the results to the serial monitor:
         Serial.print("ctrl ");
         Serial.print("current (mA) = ");
@@ -169,7 +170,6 @@ void loop() {
 void controlLoop() {
     // determine current state
     currentPosition = analogRead(POSITION_SENSOR_PIN); // read the analog in value
-    currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     
     // Read current (in mA)
     meanCurrent = motorDriver.getM1CurrentMilliamps();
@@ -185,12 +185,12 @@ void controlLoop() {
       
     // Use PID to set motor speed
     motorSpeed = MOTOR_STOPPED;
-    if(currentGear != targetGear || meanCurrent > MAX_CURRENT_ERROR) {
+    if(abs(currentPosition - targetPosition) > SENSOR_ERROR_MAX) {
         shiftPID.Compute();
         motorSpeed = Output;
     }
     else{
-        lastWorkingGear = currentGear;
+        lastWorkingGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX);
         MsTimer2::stop();
     }
     
@@ -204,7 +204,7 @@ void controlLoop() {
 
 
 // Old motor PID loop
-void controlLoopOld() {
+/*void controlLoopOld() {
     currentPosition = analogRead(POSITION_SENSOR_PIN);
     meanCurrent = motorDriver.getM1CurrentMilliamps();// + md.getM2CurrentMilliamps()) / 2;  // read current (in mA)
     if (meanCurrent > CUTOFF_CURRENT) {    // cutoffCurrent is defined in setup
@@ -218,7 +218,7 @@ void controlLoopOld() {
     motorDriver.setM1Speed(motorValue);
     //md.setM2Speed(motorValue);
     // stopIfFault();
-}
+}*/
 
 
 // This function is needed for gears to be mapped proportionally
