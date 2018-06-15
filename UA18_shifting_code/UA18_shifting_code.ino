@@ -19,16 +19,17 @@
 // Setup
 #define SENSOR_MIN          98      // reading in neutral (actual=105) - backlash (50 for now) (new is actually 272)
 #define SENSOR_MAX          795     // reading in 4th (actual=790) + backlash (50 for now) (new is actually 982)
-#define SENSOR_ERROR_MAX    10       // when the motor stops trying to change position
+#define SENSOR_ERROR_MAX    10      // when the motor stops trying to change position
 #define GEAR_MIN            0       // for neutral
 #define GEAR_MAX            4       // 4th gear
 #define PWM_MIN             -400    // VNH5019 shield PWM min & max
 #define PWM_MAX             400     // Min/Max are -400/400, set low for safety
-#define RATE                1       // ms, or 1kHz. Sets PID rate
+#define RATE                1       // ms (or 1/kHz). Sets PID rate
 #define CUTOFF_CURRENT      20000   // the max amperage before it detects a jam (in mA)
 
-#define DEBOUNCE_TIME       5       // 5ms
-#define NEUTRAL_LOCK_TIME   1000    // 1000ms / 1s
+#define DEBOUNCE_TIME       5       // ms
+#define NEUTRAL_LOCK_TIME   1000    // ms
+#define IGNITION_CUT_TIME   100     // ms
 #define MOTOR_STOPPED       0x0000
 
 
@@ -41,8 +42,10 @@
 
 bool upshiftRecentlyPressed = false;
 bool downshiftRecentlyPressed = false;
+int awaitingUpshift = 0; // works like a semaphore
 // ~50 days to roll over so should be fine
 unsigned long timeUpshiftReleased = millis();
+unsigned long timeUpshiftPressed = millis();
 unsigned long timeDownshiftReleased = millis();
 unsigned long timeDownshiftPressed = millis();
 unsigned long currentMillis = millis();
@@ -75,6 +78,8 @@ void setup() {
     
     pinMode(UPSHIFT_PIN, INPUT);
     pinMode(DOWNSHIFT_PIN, INPUT);
+    pinMode(IGNITION_CUT_PIN, OUTPUT);
+    pinMode(GEAR_OUT_PIN, OUTPUT);
     
     motorDriver.init();
     motorDriver.setM1Speed(MOTOR_STOPPED);
@@ -94,6 +99,8 @@ void setup() {
     int currentGear = mapGear(currentPosition, SENSOR_MIN, SENSOR_MAX, GEAR_MIN, GEAR_MAX); // maps the sensor to a range of 0-4 (0=N)
     targetGear = currentGear;
     lastWorkingGear = currentGear;
+    analogWrite(GEAR_OUT_PIN, currentPosition);
+    digitalWrite(IGNITION_CUT_PIN, LOW);
     
     controlLoop(); // initialize values
 }
@@ -103,6 +110,8 @@ void loop() {
     upshiftButtonDepressed = digitalRead(UPSHIFT_PIN);
     downshiftButtonDepressed = digitalRead(DOWNSHIFT_PIN);
     currentMillis = millis();
+
+    analogWrite(GEAR_OUT_PIN, currentPosition);
     
     // continually updates time until released
     if(upshiftButtonDepressed) {
@@ -125,8 +134,14 @@ void loop() {
     // read buttons
     if(upshiftButtonDepressed && !upshiftRecentlyPressed && targetGear < GEAR_MAX) {
         upshiftRecentlyPressed = true;
+        timeDownshiftPressed = currentMillis;
         targetGear += 1;
-        //MsTimer2::start();
+        // no throttle cut for 1st
+        if(targetGear > GEAR_MIN + 1) {
+            MsTimer2::stop();
+            digitalWrite(IGNITION_CUT_PIN, HIGH);
+            awaitingUpshift++;
+        }
     }
     if(downshiftButtonDepressed && !downshiftRecentlyPressed && targetGear > GEAR_MIN) {
         downshiftRecentlyPressed = true;
@@ -134,13 +149,20 @@ void loop() {
         // Neutral lock
         if(targetGear > GEAR_MIN + 1) {
             targetGear -= 1;
-            //MsTimer2::start();
         }
     }
+    
     // Neutral lock
     if(downshiftButtonDepressed && currentMillis - timeDownshiftPressed >= NEUTRAL_LOCK_TIME && targetGear == GEAR_MIN + 1) {
         targetGear = GEAR_MIN;
-        //MsTimer2::start();
+    }
+    // Throttle cut
+    if(awaitingUpshift && currentMillis - timeUpshiftPressed >= IGNITION_CUT_TIME) {
+        MsTimer2::start();
+        awaitingUpshift--;
+        if(!awaitingUpshift) {
+            digitalWrite(IGNITION_CUT_PIN, LOW);
+        }
     }
 
     // can't print during interrupt
