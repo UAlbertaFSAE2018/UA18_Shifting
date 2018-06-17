@@ -134,14 +134,15 @@ void loop() {
     // read buttons
     if(upshiftButtonDepressed && !upshiftRecentlyPressed && targetGear < GEAR_MAX) {
         upshiftRecentlyPressed = true;
-        timeDownshiftPressed = currentMillis;
-        targetGear += 1;
+        timeUpshiftPressed = currentMillis;
         // no throttle cut for 1st
-        if(targetGear > GEAR_MIN + 1) {
+        if(targetGear > GEAR_MIN) { // this is the OLD target gear
+            Serial.println("boomshakalakalaka");
             MsTimer2::stop();
             digitalWrite(IGNITION_CUT_PIN, HIGH);
             awaitingUpshift++;
         }
+        targetGear += 1; // needs to be after timer is stopped
     }
     if(downshiftButtonDepressed && !downshiftRecentlyPressed && targetGear > GEAR_MIN) {
         downshiftRecentlyPressed = true;
